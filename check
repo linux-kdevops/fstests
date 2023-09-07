@@ -18,6 +18,8 @@ showme=false
 have_test_arg=false
 randomize=false
 exact_order=false
+start_after=false
+start_after_test=""
 export here=`pwd`
 xfile=""
 subdir_xfile=""
@@ -80,6 +82,7 @@ check options
     -b			brief test summary
     -R fmt[,fmt]	generate report in formats specified. Supported formats: xunit, xunit-quiet
     --large-fs		optimise scratch device for large filesystems
+    --start-after	only start testing after the test specified
     -s section		run only specified section from config file
     -S section		exclude the specified section from the config file
     -L <n>		loop tests <n> times following a failure, measuring aggregate pass/fail metrics
@@ -312,6 +315,11 @@ while [ $# -gt 0 ]; do
 			readarray -t -O ${#exclude_tests[@]} exclude_tests < \
 				<(sed "s/#.*$//" $xfile)
 		fi
+		;;
+	--start-after)
+		start_after=true
+		start_after_test="$2"
+		shift
 		;;
 	-s)	RUN_SECTION="$RUN_SECTION $2"; shift ;;
 	-S)	EXCLUDE_SECTION="$EXCLUDE_SECTION $2"; shift ;;
@@ -590,6 +598,15 @@ _check_filesystems()
 _expunge_test()
 {
 	local TEST_ID="$1"
+
+	if $start_after; then
+		if [[ "$start_after_test" == ${TEST_ID}* ]]; then
+			start_after=false
+		fi
+		echo "       [skipped]"
+		return 0
+
+	fi
 
 	for f in "${exclude_tests[@]}"; do
 		# $f may contain traling spaces and comments
