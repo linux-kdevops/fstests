@@ -965,7 +965,7 @@ _scratch_mkfs_sized()
 		[ "$fssize" -gt "$devsize" ] && _notrun "Scratch device too small"
 	fi
 
-	if [ "$FSTYP" = "xfs" ] && [ -b "$SCRATCH_RTDEV" ]; then
+	if [ "$FSTYP" = "xfs" ] && [ "$USE_EXTERNAL" = yes -a -b "$SCRATCH_RTDEV" ]; then
 		local rtdevsize=`blockdev --getsize64 $SCRATCH_RTDEV`
 		[ "$fssize" -gt "$rtdevsize" ] && _notrun "Scratch rt device too small"
 		rt_ops="-r size=$fssize"
