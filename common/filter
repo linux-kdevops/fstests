@@ -194,6 +194,12 @@ _filter_xfs_io_unique()
     common_line_filter | _filter_xfs_io
 }
 
+_filter_xfs_io_data_unique()
+{
+    _filter_xfs_io_offset | sed -e 's| |\n|g' | grep -E -v "\.|XX|\*" | \
+	sort -u | tr -d '\n'
+}
+
 _filter_xfs_io_units_modified()
 {
 	UNIT=$1
