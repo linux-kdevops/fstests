@@ -127,6 +127,26 @@ _require_compaction()
 	    _notrun "Need compaction enabled CONFIG_COMPACTION=y"
 	fi
 }
+
+# Requires CONFIG_DEBUGFS and truncation knobs
+SPLIT_DEBUGFS="/sys/kernel/debug/split_huge_pages"
+_require_split_debugfs()
+{
+       if [ ! -f $SPLIT_DEBUGFS ]; then
+           _notrun "Needs CONFIG_DEBUGFS and split_huge_pages"
+       fi
+}
+
+_split_huge_pages_file_full()
+{
+	local file=$1
+	local offset="0x0"
+	local len=$(printf "%x" $(stat --format='%s' $file))
+	local order="0"
+	local split_cmd="$file,$offset,0x${len},$order"
+	echo $split_cmd > $SPLIT_DEBUGFS
+}
+
 # Get hugepagesize in bytes
 _get_hugepagesize()
 {
