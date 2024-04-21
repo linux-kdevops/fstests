@@ -1,0 +1,107 @@
+#! /bin/bash
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2024 Luis Chamberlain. All Rights Reserved.
+#
+# FS QA Test No. 750
+#
+# stress truncation + writeback + memory compaction
+#
+# This aims at trying to reproduce a difficult to reproduce bug found with
+# min order. The root cause lies in compaction racing with truncation on
+# min order:
+#
+# https://gist.github.com/mcgrof/d12f586ec6ebe32b2472b5d634c397df
+#
+# If you're enabling this and want to check underneath the hood you may want to
+# enable:
+#
+# dyndbg='file mm/huge_memory.c +p'
+#
+# We want to increase the rate of successful truncations + compaction racing,
+# so we want to increase the value of thp_split_page in $seqres.full.
+#
+# Our general goal here is to race with folio truncation + writeback and
+# compaction.
+
+. ./common/preamble
+. ./common/populate
+
+_begin_fstest auto long_rw stress soak smoketest
+
+# Override the default cleanup function.
+_cleanup()
+{
+	cd /
+	rm -f $tmp.*
+	rm -f $runfile
+	kill -9 $split_huge_pages_files_pid > /dev/null 2>&1
+	kill -9 $compaction_pid > /dev/null 2>&1
+}
+
+# real QA test starts here
+_supported_fs generic
+_require_test
+_require_scratch
+_require_debugfs
+_require_split_debugfs
+_require_compaction
+_require_command "$KILLALL_PROG" "killall"
+
+echo "Silence is golden"
+
+_scratch_mkfs >>$seqres.full 2>&1
+_scratch_mount >> $seqres.full 2>&1
+
+# used to let our loops know when to stop
+runfile="$tmp.keep.running.loop"
+touch $runfile
+
+# The background ops are out of bounds, the goal is to race with fsstress.
+
+# Force folio split if possible, this seems to be screaming for MADV_NOHUGEPAGE
+# for large folios.
+while [ -e $runfile ]; do
+	_split_huge_pages_all >/dev/null 2>&1
+	sleep 2
+done &
+split_huge_pages_files_pid=$!
+
+while [ -e $runfile ]; do
+	echo 1 > /proc/sys/vm/compact_memory
+	sleep 10
+done &
+compaction_pid=$!
+
+split_count_before=0
+split_count_failed_before=0
+
+if grep -q thp_split_page /proc/vmstat; then
+	split_count_before=$(grep ^thp_split_page /proc/vmstat | head -1 | awk '{print $2}')
+	split_count_failed_before=$(grep ^thp_split_page_failed /proc/vmstat | head -1 | awk '{print $2}')
+else
+	echo "no thp_split_page in /proc/vmstat" >> /proc/vmstat
+fi
+
+blocksize=$(_get_file_block_size $SCRATCH_MNT)
+nr_free_blks=$(stat -f -c '%f' $SCRATCH_MNT)
+nr_free_blks=$((nr_free_blks * 90 / 100))
+
+# Just blast large writes
+_fill_fs $((blocksize * nr_free_blks)) $SCRATCH_MNT $bsize 0 \
+	 >> $seqres.full 2>&1
+
+rm -f $runfile
+wait > /dev/null 2>&1
+
+if grep -q thp_split_page /proc/vmstat; then
+	split_count_after=$(grep ^thp_split_page /proc/vmstat | head -1 | awk '{print $2}')
+	split_count_failed_after=$(grep ^thp_split_page_failed /proc/vmstat | head -1 | awk '{print $2}')
+	thp_split_page=$((split_count_after - split_count_before))
+	thp_split_page_failed=$((split_count_failed_after - split_count_failed_before))
+
+	echo "vmstat thp_split_page: $thp_split_page" >> $seqres.full
+	echo "vmstat thp_split_page_failed: $thp_split_page_failed" >> $seqres.full
+fi
+
+status=0
+exit
