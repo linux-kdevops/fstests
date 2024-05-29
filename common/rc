@@ -166,7 +166,7 @@ _require_split_debugfs()
 
 _split_huge_pages_all()
 {
-	echo 1 > DEBUGFS_MNT/split_huge_pages
+	echo 1 > $DEBUGFS_MNT/split_huge_pages
 }
 
 # Get hugepagesize in bytes
