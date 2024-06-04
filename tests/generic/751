@@ -1,0 +1,81 @@
+#! /bin/bash
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2024 Luis Chamberlain. All Rights Reserved.
+#
+# FS QA Test No. 751
+#
+# fsstress + memory compaction test
+
+. ./common/preamble
+
+_begin_fstest auto long_rw stress soak smoketest
+
+# Override the default cleanup function.
+_cleanup()
+{
+	cd /
+	rm -f $tmp.*
+	rm -f $runfile
+	kill -9 $split_huge_pages_files_pid > /dev/null 2>&1
+}
+
+fio_config=$tmp.fio
+fio_out=$tmp.fio.out
+
+# real QA test starts here
+_supported_fs generic
+_require_test
+_require_scratch
+_require_vm_compaction
+_require_command "$KILLALL_PROG" "killall"
+
+# We may still need more fixes... but this commit will at least
+# make things better.
+_fixed_by_git_commit kernel d99e3140a4d3 \
+	"mm: turn folio_test_hugetlb into a PageType"
+
+# we need buffered IO to force truncation races with writeback in the
+# page cache
+cat >$fio_config <<EOF
+[force_large_large_folio_parallel_writes]
+nrfiles=10
+direct=0
+bs=4M
+group_reporting=1
+filesize=1GiB
+readwrite=write
+fallocate=none
+numjobs=$(nproc)
+directory=$SCRATCH_MNT
+runtime=100*${TIME_FACTOR}
+time_based
+EOF
+
+_require_fio $fio_config
+
+echo "Silence is golden"
+
+_scratch_mkfs >>$seqres.full 2>&1
+_scratch_mount >> $seqres.full 2>&1
+
+# used to let our loops know when to stop
+runfile="$tmp.keep.running.loop"
+touch $runfile
+
+while [ -e $runfile ]; do
+	echo 1 > /proc/sys/vm/compact_memory
+done &
+trigger_compaction_pid=$!
+
+# we blast away with large writes to force large folio writes when
+# possible.
+echo -e "Running fio with config:\n" >> $seqres.full
+cat $fio_config >> $seqres.full
+$FIO_PROG $fio_config --alloc-size=1048576 --output=$fio_out
+
+rm -f $runfile
+
+wait > /dev/null 2>&1
+
+status=0
+exit
